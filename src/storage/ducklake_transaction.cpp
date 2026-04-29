@@ -2571,6 +2571,17 @@ bool RetryOnError(const string &original_message) {
 	if (StringUtil::Contains(message, "concurrent")) {
 		return true;
 	}
+	// retry on transient metadata connection failures
+	if (StringUtil::Contains(message, "server closed the connection unexpectedly") ||
+	    StringUtil::Contains(message, "connection refused") ||
+	    StringUtil::Contains(message, "connection reset") ||
+	    StringUtil::Contains(message, "could not receive data") ||
+	    StringUtil::Contains(message, "lost synchronization") ||
+	    StringUtil::Contains(message, "no connection to the server") ||
+	    StringUtil::Contains(message, "unable to connect to postgres") ||
+	    StringUtil::Contains(message, "failed to execute query \"rollback\"")) {
+		return true;
+	}
 	return false;
 }
 
@@ -2601,6 +2612,7 @@ void DuckLakeTransaction::FlushChanges() {
 	optional_ptr<vector<DuckLakeGlobalStatsInfo>> stats;
 	for (idx_t i = 0; i < max_retry_count + 1; i++) {
 		bool can_retry;
+		bool commit_attempted = false;
 		try {
 			can_retry = false;
 			if (i > 0) {
@@ -2627,6 +2639,7 @@ void DuckLakeTransaction::FlushChanges() {
 			if (res->HasError()) {
 				res->GetErrorObject().Throw("Failed to flush changes into DuckLake: ");
 			}
+			commit_attempted = true;
 			connection->Commit();
 			catalog_version = commit_snapshot.schema_version;
 
@@ -2636,14 +2649,21 @@ void DuckLakeTransaction::FlushChanges() {
 			ErrorData error(ex);
 			// rollback if there is an active transaction
 			auto rollback_error = RollbackAndResetConnection();
-			bool retry_on_error = RetryOnError(error.Message());
+			string retry_message = error.Message();
+			if (!rollback_error.empty()) {
+				retry_message += "\nRollback failed with: " + rollback_error;
+			}
+			bool retry_on_error = RetryOnError(retry_message);
 			bool finished_retrying = i + 1 >= max_retry_count;
-			if (!can_retry || !retry_on_error || finished_retrying) {
+			if (commit_attempted || !can_retry || !retry_on_error || finished_retrying) {
 				// we abort after the max retry count
 				CleanupFiles();
 				// Add additional information on the number of retries and suggest to increase it
 				std::ostringstream error_message;
 				error_message << "Failed to commit DuckLake transaction." << '\n';
+				if (commit_attempted) {
+					error_message << "The metadata commit outcome is unknown; refusing to retry automatically." << '\n';
+				}
 				if (!rollback_error.empty()) {
 					error_message << "Failed to rollback metadata transaction: " << rollback_error << '\n';
 				}

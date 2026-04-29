@@ -1,0 +1,51 @@
+# name: test/sql/transaction/postgres_metadata_transient_disconnect_retry.test
+# description: Transient Postgres metadata disconnects during commit are retried with a fresh connection
+# group: [transaction]
+
+require ducklake
+
+require parquet
+
+require postgres_scanner
+
+test-env DUCKLAKE_CONNECTION {TEST_DIR}/{UUID}.db
+
+test-env DATA_PATH {TEST_DIR}
+
+statement ok
+ATTACH 'dbname=ducklakedb' AS pg (TYPE postgres)
+
+statement ok
+CALL postgres_execute('pg', 'DROP SCHEMA IF EXISTS postgres_metadata_transient_disconnect_retry CASCADE', use_transaction=false)
+
+statement ok
+ATTACH 'ducklake:{DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '{DATA_PATH}/postgres_metadata_transient_disconnect_retry', METADATA_SCHEMA 'postgres_metadata_transient_disconnect_retry')
+
+statement ok
+CALL postgres_execute('pg', 'CREATE SEQUENCE postgres_metadata_transient_disconnect_retry.disconnect_once_seq', use_transaction=false)
+
+statement ok
+CALL postgres_execute('pg', 'CREATE OR REPLACE FUNCTION postgres_metadata_transient_disconnect_retry.disconnect_once() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF nextval(''postgres_metadata_transient_disconnect_retry.disconnect_once_seq'') = 1 THEN PERFORM pg_terminate_backend(pg_backend_pid()); END IF; RETURN NEW; END; $$', use_transaction=false)
+
+statement ok
+CALL postgres_execute('pg', 'CREATE TRIGGER disconnect_once_before_snapshot_insert BEFORE INSERT ON postgres_metadata_transient_disconnect_retry.ducklake_snapshot FOR EACH ROW EXECUTE FUNCTION postgres_metadata_transient_disconnect_retry.disconnect_once()', use_transaction=false)
+
+statement ok
+USE ducklake
+
+statement ok
+SET ducklake_max_retry_count = 2
+
+statement ok
+SET ducklake_retry_wait_ms = 1
+
+statement ok
+CREATE TABLE t(i INTEGER)
+
+statement ok
+INSERT INTO t VALUES (42)
+
+query I
+SELECT * FROM t
+----
+42
