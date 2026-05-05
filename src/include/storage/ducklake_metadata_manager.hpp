@@ -142,7 +142,6 @@ public:
 	virtual unique_ptr<QueryResult> Query(DuckLakeSnapshot snapshot, string &query);
 	//! Get the catalog information for a specific snapshot
 	virtual DuckLakeCatalogInfo GetCatalogForSnapshot(DuckLakeSnapshot snapshot);
-	virtual vector<DuckLakeGlobalStatsInfo> GetGlobalTableStats(DuckLakeSnapshot snapshot);
 	virtual vector<DuckLakeFileListEntry> GetFilesForTable(DuckLakeTableEntry &table, DuckLakeSnapshot snapshot,
 	                                                       const FilterPushdownInfo *filter_info = nullptr);
 	virtual vector<DuckLakeFileListEntry> GetTableInsertions(DuckLakeTableEntry &table, DuckLakeSnapshot start_snapshot,
@@ -218,6 +217,7 @@ public:
 	virtual SnapshotChangeInfo GetSnapshotAndStatsAndChanges(DuckLakeSnapshot start_snapshot,
 	                                                         SnapshotAndStats &current_snapshot);
 	SnapshotDeletedFromFiles GetFilesDeletedOrDroppedAfterSnapshot(const DuckLakeSnapshot &start_snapshot) const;
+	virtual SnapshotAndStats GetSnapshotAndStats();
 	virtual unique_ptr<DuckLakeSnapshot> GetSnapshot();
 	virtual unique_ptr<DuckLakeSnapshot> GetSnapshot(BoundAtClause &at_clause, SnapshotBound bound);
 

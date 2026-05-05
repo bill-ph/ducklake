@@ -230,7 +230,7 @@ public:
 	idx_t GetBeginSnapshotForTable(TableIndex table_id, DuckLakeTransaction &transaction);
 	idx_t GetBeginSnapshotForSchemaVersion(TableIndex table_id, idx_t schema_version, DuckLakeTransaction &transaction);
 
-	static unique_ptr<DuckLakeStats> ConstructStatsMap(vector<DuckLakeGlobalStatsInfo> &global_stats,
+	static unique_ptr<DuckLakeStats> ConstructStatsMap(const vector<DuckLakeGlobalStatsInfo> &global_stats,
 	                                                   DuckLakeCatalogSet &schema);
 	//! Return the schema for the given snapshot - loading it if it is not yet loaded
 	DuckLakeCatalogSet &GetSchemaForSnapshot(DuckLakeTransaction &transaction, DuckLakeSnapshot snapshot);
@@ -264,7 +264,6 @@ private:
 	                                               DuckLakeCatalogSet &schema);
 	void LoadNameMaps(DuckLakeTransaction &transaction);
 	//! Generate a cache key for the ObjectCache
-	string StatsCacheKey(idx_t next_file_id) const;
 	string SchemaCacheKey(idx_t schema_version) const;
 	string SchemaPinStateKey() const;
 	ObjectCache &GetObjectCacheInstance();

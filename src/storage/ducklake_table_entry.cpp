@@ -263,7 +263,13 @@ case_insensitive_set_t DuckLakeTableEntry::GetNotNullFields() const {
 }
 
 unique_ptr<BaseStatistics> DuckLakeTableEntry::GetStatistics(ClientContext &context, column_t column_id) {
-	auto table_stats = GetTableStats(context);
+	auto &transaction = DuckLakeTransaction::Get(context, ParentCatalog());
+	return GetStatistics(transaction, transaction.GetSnapshot(), column_id);
+}
+
+unique_ptr<BaseStatistics> DuckLakeTableEntry::GetStatistics(DuckLakeTransaction &transaction,
+                                                             DuckLakeSnapshot snapshot, column_t column_id) {
+	auto table_stats = GetTableStats(transaction, snapshot);
 	if (!table_stats) {
 		return nullptr;
 	}
@@ -382,6 +388,11 @@ shared_ptr<DuckLakeTableStats> DuckLakeTableEntry::GetTableStats(ClientContext &
 }
 
 shared_ptr<DuckLakeTableStats> DuckLakeTableEntry::GetTableStats(DuckLakeTransaction &transaction) {
+	return GetTableStats(transaction, transaction.GetSnapshot());
+}
+
+shared_ptr<DuckLakeTableStats> DuckLakeTableEntry::GetTableStats(DuckLakeTransaction &transaction,
+                                                                 DuckLakeSnapshot snapshot) {
 	if (IsTransactionLocal()) {
 		// no stats for transaction local tables
 		return nullptr;
@@ -391,7 +402,7 @@ shared_ptr<DuckLakeTableStats> DuckLakeTableEntry::GetTableStats(DuckLakeTransac
 		// no stats if there are transaction-local inserts
 		return nullptr;
 	}
-	return dl_catalog.GetTableStats(transaction, GetTableId());
+	return dl_catalog.GetTableStats(transaction, snapshot, GetTableId());
 }
 
 idx_t DuckLakeTableEntry::GetNetDataFileRowCount(DuckLakeTransaction &transaction) {

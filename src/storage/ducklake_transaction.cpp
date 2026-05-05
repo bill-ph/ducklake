@@ -754,6 +754,7 @@ struct TransactionChangeInformation {
 
 	set<TableIndex> altered_tables;
 	set<TableIndex> altered_tables_with_schema_version_changes;
+	set<TableIndex> stats_validated_altered_tables;
 	set<TableIndex> altered_views;
 	set<TableIndex> dropped_tables;
 	set<TableIndex> dropped_views;
@@ -774,7 +775,6 @@ void GetTransactionTableChanges(reference<CatalogEntry> table_entry, Transaction
 		auto &table = table_entry.get().Cast<DuckLakeTableEntry>();
 		switch (table.GetLocalChange().type) {
 		case LocalChangeType::SET_PARTITION_KEY:
-		case LocalChangeType::SET_NULL:
 		case LocalChangeType::DROP_NULL:
 		case LocalChangeType::RENAME_COLUMN:
 		case LocalChangeType::ADD_COLUMN:
@@ -787,6 +787,16 @@ void GetTransactionTableChanges(reference<CatalogEntry> table_entry, Transaction
 			if (!IsTransactionLocal(table_id)) {
 				changes.altered_tables.insert(table_id);
 				changes.altered_tables_with_schema_version_changes.insert(table_id);
+			}
+			break;
+		}
+		case LocalChangeType::SET_NULL: {
+			// SET NOT NULL validates against table stats, so it must conflict with concurrent data changes.
+			auto table_id = table.GetTableId();
+			if (!IsTransactionLocal(table_id)) {
+				changes.altered_tables.insert(table_id);
+				changes.altered_tables_with_schema_version_changes.insert(table_id);
+				changes.stats_validated_altered_tables.insert(table_id);
 			}
 			break;
 		}
@@ -1337,6 +1347,12 @@ void DuckLakeTransaction::CheckForConflicts(const TransactionChangeInformation &
 	for (auto &table_id : changes.altered_tables) {
 		ConflictCheck(table_id, other_changes.dropped_tables, "alter table", "dropped it");
 		ConflictCheck(table_id, other_changes.altered_tables, "alter table", "altered it");
+	}
+	for (auto &table_id : changes.stats_validated_altered_tables) {
+		ConflictCheck(table_id, other_changes.inserted_tables, "alter table", "inserted into it");
+		ConflictCheck(table_id, other_changes.tables_inserted_inlined, "alter table", "inserted into it");
+		ConflictCheck(table_id, other_changes.tables_deleted_from, "alter table", "deleted from it");
+		ConflictCheck(table_id, other_changes.tables_deleted_inlined, "alter table", "deleted from it");
 	}
 	for (auto &view_id : changes.altered_views) {
 		ConflictCheck(view_id, other_changes.altered_views, "alter view", "altered it");
@@ -2655,6 +2671,7 @@ void DuckLakeTransaction::FlushChanges() {
 			metadata_manager->ClearInlinedTableCaches();
 			connection->BeginTransaction();
 			snapshot.reset();
+			snapshot_stats.reset();
 		}
 	}
 	// If we got here, this snapshot was successful
@@ -2751,9 +2768,32 @@ DuckLakeSnapshot DuckLakeTransaction::GetSnapshot() {
 	lock_guard<mutex> guard(snapshot_lock);
 	if (!snapshot) {
 		// no snapshot loaded yet for this transaction - load it
-		snapshot = metadata_manager->GetSnapshot();
+		auto snapshot_and_stats = metadata_manager->GetSnapshotAndStats();
+		snapshot = make_uniq<DuckLakeSnapshot>(snapshot_and_stats.snapshot);
+		snapshot_stats = make_uniq<vector<DuckLakeGlobalStatsInfo>>(std::move(snapshot_and_stats.stats));
 	}
 	return *snapshot;
+}
+
+optional_ptr<const vector<DuckLakeGlobalStatsInfo>>
+DuckLakeTransaction::GetSnapshotStats(DuckLakeSnapshot requested_snapshot) {
+	lock_guard<mutex> guard(snapshot_lock);
+	if (!snapshot) {
+		return nullptr;
+	}
+	if (snapshot->snapshot_id != requested_snapshot.snapshot_id) {
+		return nullptr;
+	}
+	if (snapshot->schema_version != requested_snapshot.schema_version) {
+		return nullptr;
+	}
+	if (snapshot->next_catalog_id != requested_snapshot.next_catalog_id) {
+		return nullptr;
+	}
+	if (snapshot->next_file_id != requested_snapshot.next_file_id) {
+		return nullptr;
+	}
+	return snapshot_stats.get();
 }
 
 DuckLakeSnapshot DuckLakeTransaction::GetSnapshot(optional_ptr<BoundAtClause> at_clause, SnapshotBound bound) {

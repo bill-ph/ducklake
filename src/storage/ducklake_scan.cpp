@@ -104,7 +104,8 @@ unique_ptr<BaseStatistics> DuckLakeStatistics(ClientContext &context, const Func
 		return nullptr;
 	}
 	auto &table = file_list.GetTable();
-	return table.GetStatistics(context, column_index);
+	auto transaction = file_list.GetTransaction();
+	return table.GetStatistics(*transaction, file_list.GetSnapshot(), column_index);
 }
 
 unique_ptr<BaseStatistics> DuckLakeStatisticsExtended(ClientContext &context, TableFunctionGetStatisticsInput &input) {

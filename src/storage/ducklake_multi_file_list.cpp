@@ -130,7 +130,8 @@ idx_t DuckLakeMultiFileList::GetTotalFileCount() const {
 }
 
 unique_ptr<NodeStatistics> DuckLakeMultiFileList::GetCardinality(ClientContext &context) const {
-	auto stats = read_info.table.GetTableStats(context);
+	auto transaction = read_info.GetTransaction();
+	auto stats = read_info.table.GetTableStats(*transaction, read_info.snapshot);
 	if (!stats) {
 		return nullptr;
 	}
@@ -139,6 +140,14 @@ unique_ptr<NodeStatistics> DuckLakeMultiFileList::GetCardinality(ClientContext &
 
 DuckLakeTableEntry &DuckLakeMultiFileList::GetTable() {
 	return read_info.table;
+}
+
+DuckLakeSnapshot DuckLakeMultiFileList::GetSnapshot() const {
+	return read_info.snapshot;
+}
+
+shared_ptr<DuckLakeTransaction> DuckLakeMultiFileList::GetTransaction() const {
+	return read_info.GetTransaction();
 }
 
 OpenFileInfo DuckLakeMultiFileList::GetFile(idx_t i) const {

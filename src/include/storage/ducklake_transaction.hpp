@@ -176,6 +176,7 @@ public:
 	DuckLakeSnapshot GetSnapshot();
 	DuckLakeSnapshot GetSnapshot(optional_ptr<BoundAtClause> at_clause,
 	                             SnapshotBound bound = SnapshotBound::UPPER_BOUND);
+	optional_ptr<const vector<DuckLakeGlobalStatsInfo>> GetSnapshotStats(DuckLakeSnapshot snapshot);
 
 	static DuckLakeTransaction &Get(ClientContext &context, Catalog &catalog);
 
@@ -348,6 +349,7 @@ private:
 	//! The snapshot of the transaction (latest snapshot in DuckLake)
 	mutex snapshot_lock;
 	unique_ptr<DuckLakeSnapshot> snapshot;
+	unique_ptr<vector<DuckLakeGlobalStatsInfo>> snapshot_stats;
 	idx_t local_catalog_id;
 	//! New tables added by this transaction
 	case_insensitive_map_t<unique_ptr<DuckLakeCatalogSet>> new_tables;

@@ -906,32 +906,6 @@ void TransformGlobalStatsRow(const ROW &row, vector<DuckLakeGlobalStatsInfo> &gl
 	stats_entry.column_stats.push_back(std::move(column_stats));
 }
 
-vector<DuckLakeGlobalStatsInfo> TransformGlobalStats(QueryResult &result) {
-	if (result.HasError()) {
-		result.GetErrorObject().Throw("Failed to get global stats information from DuckLake: ");
-	}
-
-	vector<DuckLakeGlobalStatsInfo> global_stats;
-
-	for (auto &row : result) {
-		TransformGlobalStatsRow(row, global_stats);
-	}
-
-	return global_stats;
-}
-
-vector<DuckLakeGlobalStatsInfo> DuckLakeMetadataManager::GetGlobalTableStats(DuckLakeSnapshot snapshot) {
-	// query the most recent stats
-	auto result = transaction.Query(snapshot, R"(
-SELECT table_id, column_id, record_count, next_row_id, file_size_bytes, contains_null, contains_nan, min_value, max_value, extra_stats
-FROM {METADATA_CATALOG}.ducklake_table_stats
-LEFT JOIN {METADATA_CATALOG}.ducklake_table_column_stats USING (table_id)
-WHERE record_count IS NOT NULL AND file_size_bytes IS NOT NULL
-ORDER BY table_id;
-)");
-	return TransformGlobalStats(*result);
-}
-
 string DuckLakeMetadataManager::GetFileSelectList(const string &prefix) {
 	static const vector<string> column_list {
 	    "path", "path_is_relative", "file_size_bytes", "footer_size", "encryption_key",
@@ -1415,7 +1389,6 @@ DuckLakeMetadataManager::GenerateCTESectionFromRequirements(const unordered_map<
 
 	return cte_section + "\n";
 }
-
 
 FilterPushdownQueryComponents
 DuckLakeMetadataManager::GenerateFilterPushdownComponents(const FilterPushdownInfo &filter_info,
@@ -3683,6 +3656,73 @@ unique_ptr<DuckLakeSnapshot> DuckLakeMetadataManager::GetSnapshot() {
 		throw InvalidInputException("No snapshot found in DuckLake");
 	}
 	return snapshot;
+}
+
+SnapshotAndStats DuckLakeMetadataManager::GetSnapshotAndStats() {
+	SnapshotAndStats snapshot_and_stats;
+	auto result = transaction.Query(R"(
+SELECT
+    snapshot_id,
+    schema_version,
+    next_catalog_id,
+    next_file_id,
+    NULL AS table_id,
+    NULL AS column_id,
+    NULL AS record_count,
+    NULL AS next_row_id,
+    NULL AS file_size_bytes,
+    NULL AS contains_null,
+    NULL AS contains_nan,
+    NULL AS min_value,
+    NULL AS max_value,
+    NULL AS extra_stats
+FROM {METADATA_CATALOG}.ducklake_snapshot
+WHERE snapshot_id = (
+    SELECT MAX(snapshot_id)
+    FROM {METADATA_CATALOG}.ducklake_snapshot)
+UNION ALL
+SELECT
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    table_id,
+    column_id,
+    record_count,
+    next_row_id,
+    file_size_bytes,
+    contains_null,
+    contains_nan,
+    min_value,
+    max_value,
+    extra_stats
+FROM {METADATA_CATALOG}.ducklake_table_stats
+LEFT JOIN {METADATA_CATALOG}.ducklake_table_column_stats
+    USING (table_id)
+WHERE record_count IS NOT NULL
+    AND file_size_bytes IS NOT NULL
+ORDER BY table_id NULLS FIRST;
+)");
+	if (result->HasError()) {
+		result->GetErrorObject().Throw("Failed to query most recent snapshot and global stats for DuckLake: ");
+	}
+
+	bool first_row = true;
+	for (auto &row : *result) {
+		if (first_row) {
+			snapshot_and_stats.snapshot.snapshot_id = row.GetValue<idx_t>(0);
+			snapshot_and_stats.snapshot.schema_version = row.GetValue<idx_t>(1);
+			snapshot_and_stats.snapshot.next_catalog_id = row.GetValue<idx_t>(2);
+			snapshot_and_stats.snapshot.next_file_id = row.GetValue<idx_t>(3);
+		} else {
+			TransformGlobalStatsRow(row, snapshot_and_stats.stats, 4);
+		}
+		first_row = false;
+	}
+	if (first_row) {
+		throw InvalidInputException("No snapshot found in DuckLake");
+	}
+	return snapshot_and_stats;
 }
 
 unique_ptr<DuckLakeSnapshot> DuckLakeMetadataManager::GetSnapshot(BoundAtClause &at_clause, SnapshotBound bound) {

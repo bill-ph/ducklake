@@ -86,6 +86,7 @@ public:
 	void SetSortData(unique_ptr<DuckLakeSort> sort_data);
 	shared_ptr<DuckLakeTableStats> GetTableStats(ClientContext &context);
 	shared_ptr<DuckLakeTableStats> GetTableStats(DuckLakeTransaction &transaction);
+	shared_ptr<DuckLakeTableStats> GetTableStats(DuckLakeTransaction &transaction, DuckLakeSnapshot snapshot);
 	idx_t GetNetDataFileRowCount(DuckLakeTransaction &transaction);
 	idx_t GetNetInlinedRowCount(DuckLakeTransaction &transaction);
 
@@ -97,6 +98,8 @@ public:
 
 public:
 	unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, column_t column_id) override;
+	unique_ptr<BaseStatistics> GetStatistics(DuckLakeTransaction &transaction, DuckLakeSnapshot snapshot,
+	                                         column_t column_id);
 
 	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override;
 	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data,
