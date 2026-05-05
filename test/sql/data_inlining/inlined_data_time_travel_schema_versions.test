@@ -1,0 +1,47 @@
+# name: test/sql/data_inlining/inlined_data_time_travel_schema_versions.test
+# description: Test inlined data registry entries are scoped to the selected snapshot schema version
+# group: [data_inlining]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION {TEST_DIR}/{UUID}.db
+
+test-env DATA_PATH {TEST_DIR}
+
+statement ok
+ATTACH 'ducklake:{DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '{DATA_PATH}/inlined_time_travel_schema_versions', METADATA_CATALOG 'ducklake_meta', DATA_INLINING_ROW_LIMIT 1000)
+
+statement ok
+CREATE TABLE ducklake.t(i INTEGER)
+
+statement ok
+INSERT INTO ducklake.t VALUES (1), (2)
+
+statement ok
+SET VARIABLE before_alter = (SELECT max(snapshot_id) FROM ducklake.snapshots())
+
+statement ok
+ALTER TABLE ducklake.t ADD COLUMN j INTEGER DEFAULT 99
+
+statement ok
+INSERT INTO ducklake.t VALUES (3, 30), (4, 40)
+
+query I
+SELECT count(*) FROM ducklake_meta.ducklake_inlined_data_tables
+----
+2
+
+query I
+SELECT sum(i) FROM ducklake.t AT (VERSION => getvariable('before_alter'))
+----
+3
+
+query II
+SELECT i, j FROM ducklake.t ORDER BY i
+----
+1	99
+2	99
+3	30
+4	40
