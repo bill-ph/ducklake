@@ -32,6 +32,7 @@ struct DuckLakeNewGlobalStats;
 struct DuckLakeTableStats;
 struct SnapshotChangeInformation;
 struct TransactionChangeInformation;
+struct DuckLakeSnapshotStatsCacheEntry;
 struct NewDataInfo;
 struct NewTableInfo;
 struct NewNameMapInfo;
@@ -349,7 +350,7 @@ private:
 	//! The snapshot of the transaction (latest snapshot in DuckLake)
 	mutex snapshot_lock;
 	unique_ptr<DuckLakeSnapshot> snapshot;
-	unique_ptr<vector<DuckLakeGlobalStatsInfo>> snapshot_stats;
+	shared_ptr<DuckLakeSnapshotStatsCacheEntry> snapshot_stats;
 	idx_t local_catalog_id;
 	//! New tables added by this transaction
 	case_insensitive_map_t<unique_ptr<DuckLakeCatalogSet>> new_tables;

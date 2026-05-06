@@ -11,10 +11,12 @@
 #include "common/ducklake_encryption.hpp"
 #include "common/ducklake_options.hpp"
 #include "common/ducklake_name_map.hpp"
+#include "common/ducklake_snapshot.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/main/client_context_state.hpp"
 #include "duckdb/storage/object_cache.hpp"
 #include "storage/ducklake_catalog_set.hpp"
+#include "storage/ducklake_metadata_info.hpp"
 #include "storage/ducklake_partition_data.hpp"
 #include "storage/ducklake_stats.hpp"
 
@@ -22,7 +24,6 @@
 #include <functional>
 
 namespace duckdb {
-struct DuckLakeGlobalStatsInfo;
 class ColumnList;
 class DuckLakeFieldData;
 struct DuckLakeFileListEntry;
@@ -30,17 +31,21 @@ struct DuckLakeConfigOption;
 struct DeleteFileMap;
 class LogicalGet;
 
-//! Cache entry for DuckLake table statistics
-struct DuckLakeStatsCacheEntry : public ObjectCacheEntry {
+//! Cache entry for aggregate statistics captured with a specific DuckLake snapshot
+struct DuckLakeSnapshotStatsCacheEntry : public ObjectCacheEntry {
 	static constexpr idx_t ESTIMATED_BYTES_PER_COLUMN_STATS = 256;
 
-	explicit DuckLakeStatsCacheEntry(unique_ptr<DuckLakeStats> stats_p) : stats(std::move(*stats_p)) {
+	DuckLakeSnapshotStatsCacheEntry(DuckLakeSnapshot snapshot_p, vector<DuckLakeGlobalStatsInfo> stats_p)
+	    : snapshot(snapshot_p), stats(make_shared_ptr<vector<DuckLakeGlobalStatsInfo>>(std::move(stats_p))) {
 	}
 
-	DuckLakeStats stats;
+	DuckLakeSnapshot snapshot;
+	shared_ptr<const vector<DuckLakeGlobalStatsInfo>> stats;
+	mutex constructed_stats_lock;
+	shared_ptr<DuckLakeStats> constructed_stats;
 
 	static string ObjectType() {
-		return "ducklake_stats";
+		return "ducklake_snapshot_stats";
 	}
 	string GetObjectType() override {
 		return ObjectType();
@@ -157,6 +162,9 @@ public:
 	                                              unique_ptr<CreateIndexInfo> create_info,
 	                                              unique_ptr<AlterTableInfo> alter_info) override;
 	DatabaseSize GetDatabaseSize(ClientContext &context) override;
+	shared_ptr<DuckLakeSnapshotStatsCacheEntry> GetCachedSnapshotStats(const DuckLakeSnapshot &snapshot);
+	shared_ptr<DuckLakeSnapshotStatsCacheEntry> CacheSnapshotStats(DuckLakeSnapshot snapshot,
+	                                                               vector<DuckLakeGlobalStatsInfo> stats);
 	shared_ptr<DuckLakeTableStats> GetTableStats(DuckLakeTransaction &transaction, TableIndex table_id);
 	shared_ptr<DuckLakeTableStats> GetTableStats(DuckLakeTransaction &transaction, DuckLakeSnapshot snapshot,
 	                                             TableIndex table_id);
@@ -256,14 +264,16 @@ private:
 	//! Look up (or load) the ObjectCache entry for a given snapshot.
 	shared_ptr<DuckLakeSchemaCacheEntry> GetSchemaCacheEntry(DuckLakeTransaction &transaction,
 	                                                         DuckLakeSnapshot snapshot);
-	shared_ptr<DuckLakeStatsCacheEntry> GetStatsForSnapshot(DuckLakeTransaction &transaction,
-	                                                        DuckLakeSnapshot snapshot);
+	shared_ptr<DuckLakeSnapshotStatsCacheEntry> GetStatsForSnapshot(DuckLakeTransaction &transaction,
+	                                                                DuckLakeSnapshot snapshot);
 	//! Pin a schema cache entry for the duration of the current query to ensure safe memory access.
 	void PinSchemaForQuery(DuckLakeTransaction &transaction, shared_ptr<DuckLakeSchemaCacheEntry> entry);
-	unique_ptr<DuckLakeStats> LoadStatsForSnapshot(DuckLakeTransaction &transaction, DuckLakeSnapshot snapshot,
-	                                               DuckLakeCatalogSet &schema);
+	shared_ptr<DuckLakeStats> LoadStatsForSnapshot(DuckLakeTransaction &transaction, DuckLakeSnapshot snapshot,
+	                                               DuckLakeCatalogSet &schema,
+	                                               shared_ptr<DuckLakeSnapshotStatsCacheEntry> stats_entry);
 	void LoadNameMaps(DuckLakeTransaction &transaction);
 	//! Generate a cache key for the ObjectCache
+	string SnapshotStatsCacheKey(const DuckLakeSnapshot &snapshot) const;
 	string SchemaCacheKey(idx_t schema_version) const;
 	string SchemaPinStateKey() const;
 	ObjectCache &GetObjectCacheInstance();

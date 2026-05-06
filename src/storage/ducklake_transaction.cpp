@@ -2768,9 +2768,17 @@ DuckLakeSnapshot DuckLakeTransaction::GetSnapshot() {
 	lock_guard<mutex> guard(snapshot_lock);
 	if (!snapshot) {
 		// no snapshot loaded yet for this transaction - load it
-		auto snapshot_and_stats = metadata_manager->GetSnapshotAndStats();
-		snapshot = make_uniq<DuckLakeSnapshot>(snapshot_and_stats.snapshot);
-		snapshot_stats = make_uniq<vector<DuckLakeGlobalStatsInfo>>(std::move(snapshot_and_stats.stats));
+		auto latest_snapshot = metadata_manager->GetSnapshot();
+		if (!latest_snapshot) {
+			throw InvalidInputException("No snapshot found in DuckLake");
+		}
+		snapshot_stats = ducklake_catalog.GetCachedSnapshotStats(*latest_snapshot);
+		if (!snapshot_stats) {
+			auto snapshot_and_stats = metadata_manager->GetSnapshotAndStats();
+			snapshot_stats =
+			    ducklake_catalog.CacheSnapshotStats(snapshot_and_stats.snapshot, std::move(snapshot_and_stats.stats));
+		}
+		snapshot = make_uniq<DuckLakeSnapshot>(snapshot_stats->snapshot);
 	}
 	return *snapshot;
 }
@@ -2793,7 +2801,7 @@ DuckLakeTransaction::GetSnapshotStats(DuckLakeSnapshot requested_snapshot) {
 	if (snapshot->next_file_id != requested_snapshot.next_file_id) {
 		return nullptr;
 	}
-	return snapshot_stats.get();
+	return snapshot_stats->stats.get();
 }
 
 DuckLakeSnapshot DuckLakeTransaction::GetSnapshot(optional_ptr<BoundAtClause> at_clause, SnapshotBound bound) {
